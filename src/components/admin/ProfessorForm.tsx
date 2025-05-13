@@ -193,28 +193,33 @@ export function ProfessorForm({ professorId, onSuccess }: ProfessorFormProps) {
         faculty_id: facultyId,
         description: description.trim() || null
       };
-
-      let result;
       
       if (isEditing && professorId) {
-        result = await supabase
+        const { error: updError } = await supabase
           .from('professors')
           .update(professorData)
           .eq('id', professorId);
-      } else {
-        result = await supabase
-          .from('professors')
-          .insert([professorData])
-          .select('fullName,phoneNumber,email,position,faculty_id,description');
-      }
 
-      if (result.error) {
-        if (result.error.code === '23505') {
+        if (updError?.code === '23505') {
           setEmailError('Преподаватель с таким email уже существует');
           return;
         }
-        throw result.error;
+        if (updError) throw updError;
+      } else {
+        const { data: newId, error: rpcError } = await supabase
+          .rpc<{ new_id: string }>(
+            'insert_professor_if_email_unique',
+            { professor_data: professorData }
+          );
+
+        if (rpcError?.code === '23505') {
+          setEmailError('Преподаватель с таким email уже существует');
+          return;
+        }
+        if (rpcError) throw rpcError;
+        // newId — UUID вставленного преподавателя
       }
+
 
       setSuccess(true);
       
