@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Statistics } from '../../types/university';
 import { AlertCircle, Check } from 'lucide-react';
 
 interface StatisticsFormProps {
@@ -36,11 +35,11 @@ export function StatisticsForm({ onSuccess }: StatisticsFormProps) {
       if (data && data.length > 0) {
         const stats = data[0];
         setStatsId(stats.id);
-        setTotalStudents(stats.totalStudents || 0);
-        setTotalProfessors(stats.totalProfessors || 0);
-        setTotalAwards(stats.totalAwards || 0);
-        setInternationalRanking(stats.internationalRanking || 0);
-        setFoundationYear(stats.foundationYear || 1945);
+        setTotalStudents(stats.totalstudents || 0);
+        setTotalProfessors(stats.totalprofessors || 0);
+        setTotalAwards(stats.totalawards || 0);
+        setInternationalRanking(stats.internationalranking || 0);
+        setFoundationYear(stats.foundationyear || 1945);
       }
     } catch (err) {
       console.error('Error fetching statistics:', err);
@@ -86,11 +85,11 @@ export function StatisticsForm({ onSuccess }: StatisticsFormProps) {
     setSuccess(false);
 
     const statisticsData = {
-      totalStudents,
-      totalProfessors,
-      totalAwards,
-      internationalRanking,
-      foundationYear
+      totalstudents: totalStudents,
+      totalprofessors: totalProfessors,
+      totalawards: totalAwards,
+      internationalranking: internationalRanking,
+      foundationyear: foundationYear
     };
 
     try {
@@ -112,11 +111,8 @@ export function StatisticsForm({ onSuccess }: StatisticsFormProps) {
       }
 
       setSuccess(true);
-      
-      // Notify parent component
       onSuccess();
       
-      // Hide success message after 3 seconds
       setTimeout(() => {
         setSuccess(false);
       }, 3000);

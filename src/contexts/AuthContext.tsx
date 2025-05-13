@@ -100,61 +100,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       // Try to load the profile from the database
       try {
-        // Use id filter instead of email
-        const { data, error } = await supabase
+        const { data: existingProfile, error: fetchError } = await supabase
           .from('profiles')
           .select('*')
-          .eq('id', userId);
+          .eq('id', userId)
+          .maybeSingle();
 
-        if (error) {
-          console.warn('Using default profile due to error:', error);
+        if (fetchError) {
+          console.warn('Error fetching profile:', fetchError);
           setProfile(defaultProfile);
-        } else if (data && data.length > 0) {
-          // Store the profile name in localStorage as a backup
-          localStorage.setItem('user_full_name', data[0].full_name);
-          setProfile(data[0]);
+        } else if (existingProfile) {
+          // Profile exists, use it
+          localStorage.setItem('user_full_name', existingProfile.full_name);
+          setProfile(existingProfile);
         } else {
-          console.warn('No profile found, creating one');
-          
-          // Try to create a profile if it doesn't exist
-          try {
-            // First check if profile already exists to avoid duplicate key error
-            const { count, error: countError } = await supabase
-              .from('profiles')
-              .select('*', { count: 'exact', head: true })
-              .eq('id', userId);
-              
-            if (countError) {
-              console.warn('Error checking profile existence:', countError);
-              setProfile(defaultProfile);
-              setLoading(false);
-              return;
-            }
-            
-            // Only insert if profile doesn't exist
-            if (count === 0) {
-              const { error: insertError } = await supabase
-                .from('profiles')
-                .insert([defaultProfile]);
-                
-              if (insertError) {
-                console.warn('Error creating profile:', insertError);
-              } else {
-                // Profile created successfully
-                console.log('Profile created successfully');
-              }
-            } else {
-              console.log('Profile already exists, skipping creation');
-            }
-            
-            setProfile(defaultProfile);
-          } catch (insertErr) {
-            console.warn('Exception creating profile:', insertErr);
-            setProfile(defaultProfile);
-          }
+          // No profile exists, let the database trigger handle creation
+          console.log('No profile found, trigger will handle creation');
+          setProfile(defaultProfile);
         }
       } catch (err) {
-        console.warn('Exception loading profile, using default:', err);
+        console.warn('Exception loading profile:', err);
         setProfile(defaultProfile);
       }
     } catch (error) {

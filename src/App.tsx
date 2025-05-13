@@ -10,8 +10,10 @@ import { RegisterPage } from './pages/RegisterPage';
 import { ContactsPage } from './pages/ContactsPage';
 import { NewsPage } from './pages/NewsPage';
 import { FAQPage } from './pages/FAQPage';
+import { MaterialsPage } from './pages/MaterialsPage';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { Toaster } from 'sonner';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -94,11 +96,20 @@ function App() {
             </PrivateRoute>
           }
         />
+        <Route
+          path="/materials"
+          element={
+            <PrivateRoute>
+              <MaterialsPage />
+            </PrivateRoute>
+          }
+        />
         
         {/* Redirect all other routes to login if not authenticated, or home if authenticated */}
         <Route path="*" element={<Navigate to={user ? "/" : "/login"} />} />
       </Routes>
       <OfflineIndicator />
+      <Toaster position="top-right" richColors />
     </BrowserRouter>
   );
 }

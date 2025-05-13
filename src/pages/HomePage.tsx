@@ -15,17 +15,17 @@ export function HomePage() {
     try {
       setIsLoggingOut(true);
       await signOut();
-      // Принудительно перенаправляем на страницу входа
-      window.location.href = '/login';
+      // Redirect to root path instead of /login
+      window.location.href = '/';
     } catch (error) {
       console.error('Error signing out:', error);
-      // Если произошла ошибка, все равно пытаемся перенаправить
+      // If error occurs, still redirect to root
       setIsLoggingOut(false);
-      navigate('/login');
+      navigate('/');
     }
   };
 
-  // Получаем имя пользователя из разных источников, приоритет отдаем данным профиля
+  // Get username from different sources, prioritize profile data
   const userName = profile?.full_name || 
                   (user?.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : 
                   localStorage.getItem('user_full_name') || 'Пользователь');

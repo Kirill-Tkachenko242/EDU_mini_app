@@ -5,10 +5,70 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 // Validate environment variables
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Supabase environment variables are missing!');
+  throw new Error('Required Supabase environment variables are missing');
 }
 
-// Create a more resilient Supabase client with better retry logic
+// Retry configuration
+const RETRY_COUNT = 3;
+const INITIAL_RETRY_DELAY = 1000; // 1 second
+const CONNECTION_TIMEOUT = 10000; // 10 seconds
+const REQUEST_TIMEOUT = 15000; // 15 seconds
+
+// Enhanced connection check with multiple fallback endpoints
+const checkEndpoints = async () => {
+  const endpoints = [
+    { url: `${supabaseUrl}/rest/v1/`, headers: { 'apikey': supabaseAnonKey } },
+    { url: 'https://www.google.com/favicon.ico', mode: 'no-cors' as RequestMode },
+    { url: 'https://api.github.com/zen', mode: 'no-cors' as RequestMode }
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint.url, {
+        method: 'HEAD',
+        mode: endpoint.mode,
+        headers: endpoint.headers,
+        signal: AbortSignal.timeout(5000)
+      });
+      
+      if (response.ok || response.type === 'opaque') {
+        return true;
+      }
+    } catch {
+      continue;
+    }
+  }
+  
+  return false;
+};
+
+// Exponential backoff retry function with improved error handling
+const retryWithBackoff = async (fn: () => Promise<any>, retries = RETRY_COUNT, delay = INITIAL_RETRY_DELAY) => {
+  try {
+    return await fn();
+  } catch (error: any) {
+    if (retries === 0) {
+      // Enhanced error reporting
+      const errorDetails = {
+        message: error.message,
+        code: error.code,
+        statusCode: error.status || error.statusCode,
+        details: error.details || error.data,
+        timestamp: new Date().toISOString()
+      };
+      
+      console.error('Supabase request failed after all retries:', errorDetails);
+      throw error;
+    }
+    
+    console.log(`Retrying request. Attempts remaining: ${retries - 1}. Delay: ${delay}ms`);
+    await new Promise(resolve => setTimeout(resolve, delay));
+    
+    return retryWithBackoff(fn, retries - 1, Math.min(delay * 2, 10000));
+  }
+};
+
+// Create a more resilient Supabase client with enhanced error handling
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
@@ -16,30 +76,71 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: false,
     storageKey: 'supabase.auth.token'
   },
-  global: {
+  /* global: {
     headers: {
       'Content-Type': 'application/json'
     }
-  },
-  // Add more resilient fetch behavior with timeout and retry
-  fetch: (...args) => {
-    // Use a custom fetch with timeout
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        console.log('Supabase request timed out');
-        reject(new Error('Request timeout'));
-      }, 15000); // 15 second timeout
+  }, */
+  // Enhanced fetch behavior with better timeout and retry logic
+  fetch: async (...args) => {
+    // Check connection before making request
+    const online = await checkEndpoints();
+    if (!online) {
+      throw new Error('No network connection available. Please check your internet connection.');
+    }
+
+    return retryWithBackoff(async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
       
-      fetch(...args)
-        .then(response => {
-          clearTimeout(timeoutId);
-          resolve(response);
-        })
-        .catch(error => {
-          clearTimeout(timeoutId);
-          console.error('Fetch error in Supabase client:', error);
-          reject(error);
+      try {
+        const response = await fetch(...args, {
+          signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          
+          // Enhanced error handling for specific cases
+          if (response.status === 409) {
+            // Check for specific constraint violations
+            if (errorData.message?.includes('idx_professors_email_lower')) {
+              throw new Error('Преподаватель с таким email уже существует в системе');
+            }
+            
+            const constraintMatch = errorData.message?.match(/violates unique constraint "([^"]+)"/);
+            if (constraintMatch) {
+              // Map known constraints to user-friendly messages
+              const constraintMessages: Record<string, string> = {
+                'professors_email_key': 'Преподаватель с таким email уже существует',
+                'professors_phone_number_key': 'Преподаватель с таким номером телефона уже существует',
+                'idx_professors_email_lower': 'Преподаватель с таким email уже существует в системе'
+              };
+              
+              const message = constraintMessages[constraintMatch[1]] || 'Запись с такими данными уже существует';
+              throw new Error(message);
+            }
+          }
+          
+          if (response.status === 429) {
+            throw new Error('Too many requests. Please try again later.');
+          }
+          
+          throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+        }
+        
+        return response;
+      } catch (error: any) {
+        clearTimeout(timeoutId);
+        
+        if (error.name === 'AbortError') {
+          throw new Error('Request timed out. Please try again.');
+        }
+        
+        throw error;
+      }
     });
   }
 });
@@ -49,67 +150,37 @@ let isOnline = true;
 let lastConnectionAttempt = 0;
 let connectionCheckInterval: number | null = null;
 
-// Function to check connection status with debouncing
+// Enhanced connection status check with debouncing
 const checkConnection = async (force = false) => {
   const now = Date.now();
-  // Don't check too frequently unless forced
   if (!force && now - lastConnectionAttempt < 3000) {
     return isOnline;
   }
   
   lastConnectionAttempt = now;
+  const newStatus = await checkEndpoints();
   
-  try {
-    // Simple lightweight check - just try to get session
-    const { data, error } = await supabase.auth.getSession();
-    
-    if (error) {
-      if (isOnline) {
-        console.log('Connection status changed: offline (Auth error)', error);
-      }
-      isOnline = false;
-      return false;
-    }
-    
-    // If we get here, we have a connection to Supabase
-    if (!isOnline) {
-      console.log('Connection status changed: online (Auth check successful)');
-    }
-    isOnline = true;
-    return true;
-  } catch (error) {
-    // Fallback to a simple fetch to check general internet connectivity
-    try {
-      const response = await fetch('https://www.google.com/favicon.ico', { 
-        method: 'HEAD',
-        mode: 'no-cors',
-        cache: 'no-store',
-        signal: AbortSignal.timeout(5000) // 5 second timeout
-      });
-      
-      // If we get here, we have internet but Supabase might be down
-      if (!isOnline) {
-        console.log('Connection status changed: online (general internet only)');
-      }
-      isOnline = true;
-      return true;
-    } catch (fallbackError) {
-      if (isOnline) {
-        console.log('Connection status changed: offline (complete)', error);
-      }
-      isOnline = false;
-      return false;
-    }
+  if (newStatus !== isOnline) {
+    console.log(`Connection status changed: ${newStatus ? 'online' : 'offline'}`);
+    isOnline = newStatus;
   }
+  
+  return isOnline;
 };
 
-// Start monitoring connection
+// Start monitoring connection with error handling
 export const startConnectionMonitoring = () => {
   if (!connectionCheckInterval) {
-    // Check immediately
-    checkConnection(true);
-    // Then check every 5 seconds
-    connectionCheckInterval = window.setInterval(() => checkConnection(), 5000);
+    try {
+      checkConnection(true);
+      connectionCheckInterval = window.setInterval(() => {
+        checkConnection().catch(error => {
+          console.error('Connection monitoring error:', error);
+        });
+      }, 5000);
+    } catch (error) {
+      console.error('Failed to start connection monitoring:', error);
+    }
   }
 };
 
@@ -121,12 +192,12 @@ export const stopConnectionMonitoring = () => {
   }
 };
 
-// Get current connection status
+// Get current connection status with immediate check if offline
 export const getConnectionStatus = () => {
-  // Force a check if we're currently offline
   if (!isOnline) {
-    // Don't wait for the async result, just trigger the check
-    checkConnection(true);
+    checkConnection(true).catch(error => {
+      console.error('Failed to check connection status:', error);
+    });
   }
   return isOnline;
 };
@@ -134,56 +205,77 @@ export const getConnectionStatus = () => {
 // Initialize connection monitoring
 startConnectionMonitoring();
 
-// Add a helper function to handle common auth errors
+// Enhanced auth error handler with more specific error messages
 export const handleAuthError = (error: any): string => {
   if (!error) return 'Неизвестная ошибка';
   
-  // Check for specific error codes
-  if (error.code === 'invalid_credentials' || 
-      error.message?.includes('Invalid login credentials')) {
+  const errorCode = error.code?.toLowerCase() || '';
+  const errorMessage = error.message?.toLowerCase() || '';
+  
+  // Database constraint errors - Enhanced with specific professor-related errors
+  if (errorCode === '23505' || errorMessage.includes('duplicate key value')) {
+    if (errorMessage.includes('idx_professors_email_lower')) {
+      return 'Преподаватель с таким email уже существует в системе';
+    }
+    if (errorMessage.includes('professors_email_key')) {
+      return 'Преподаватель с таким email уже существует';
+    }
+    if (errorMessage.includes('professors_phone_number_key')) {
+      return 'Преподаватель с таким номером телефона уже существует';
+    }
+    return 'Запись с такими данными уже существует';
+  }
+  
+  // Authentication errors
+  if (errorCode.includes('invalid_credentials') || 
+      errorMessage.includes('invalid login credentials')) {
     return 'Неверный email или пароль';
   }
   
-  if (error.code === 'user_not_found' || 
-      error.message?.includes('user not found')) {
+  if (errorCode.includes('user_not_found') || 
+      errorMessage.includes('user not found')) {
     return 'Пользователь не найден';
   }
   
-  if (error.code === 'email_not_confirmed' || 
-      error.message?.includes('Email not confirmed')) {
+  if (errorCode.includes('email_not_confirmed') || 
+      errorMessage.includes('email not confirmed')) {
     return 'Email не подтвержден. Пожалуйста, проверьте вашу почту';
   }
   
-  if (error.code === 'invalid_grant' || 
-      error.message?.includes('invalid grant')) {
-    return 'Неверный email или пароль';
+  // Network and connection errors
+  if (errorMessage.includes('network') || 
+      errorMessage.includes('connection') ||
+      errorMessage.includes('timeout') ||
+      errorCode === 'fetch_error') {
+    return 'Проблема с подключением к серверу. Пожалуйста, проверьте интернет-соединение и попробуйте снова';
   }
   
-  // Network related errors
-  if (error.code === 'fetch_error' || 
-      error.message?.includes('fetch') || 
-      error.message?.includes('network') ||
-      error.message?.includes('подключения')) {
-    return 'Проблема с подключением к серверу. Пожалуйста, проверьте интернет-соединение';
+  // Session errors
+  if (errorMessage.includes('session expired') ||
+      errorMessage.includes('invalid session')) {
+    return 'Сессия истекла. Пожалуйста, войдите снова';
   }
   
-  // Return the original message if we don't have a specific handler
   return error.message || 'Произошла ошибка. Пожалуйста, попробуйте позже';
 };
 
-// Function to clear all auth data from local storage
+// Enhanced auth data cleanup
 export const clearAuthData = () => {
   try {
-    localStorage.removeItem('supabase.auth.token');
-    // Clear any other auth-related items that might be in localStorage
-    const keysToRemove = [];
+    // Clear all Supabase-related items
+    const authKeys = ['supabase.auth.token', 'supabase.auth.refreshToken', 'supabase.auth.user'];
+    authKeys.forEach(key => localStorage.removeItem(key));
+    
+    // Clear any other auth-related items
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key && (key.includes('supabase') || key.includes('auth'))) {
-        keysToRemove.push(key);
+        localStorage.removeItem(key);
       }
     }
-    keysToRemove.forEach(key => localStorage.removeItem(key));
+    
+    // Clear session storage as well
+    sessionStorage.clear();
     
     return true;
   } catch (error) {

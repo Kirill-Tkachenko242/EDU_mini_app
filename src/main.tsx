@@ -4,7 +4,14 @@ import App from './App.tsx';
 import { AuthProvider } from './contexts/AuthContext';
 import './index.css';
 
-createRoot(document.getElementById('root')!).render(
+const container = document.getElementById('root');
+if (!container) {
+  throw new Error('Failed to find root element');
+}
+
+const root = createRoot(container);
+
+root.render(
   <StrictMode>
     <AuthProvider>
       <App />

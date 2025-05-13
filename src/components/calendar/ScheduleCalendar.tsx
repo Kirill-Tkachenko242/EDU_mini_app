@@ -29,27 +29,31 @@ export function ScheduleCalendar({ teacherId = '', groupId = '' }: { teacherId?:
   const fetchEvents = async () => {
     try {
       setLoading(true);
+      setError('');
       
-      // Try to fetch events from the database
-      const query = supabase.from('schedule_events').select('*');
+      let query = supabase.from('schedule_events').select('*');
       
       if (teacherId) {
-        query.eq('teacher_id', teacherId);
-      } else if (groupId) {
-        query.eq('group_id', groupId);
+        query = query.eq('teacher_id', teacherId);
       }
       
-      const { data, error } = await query;
-      
-      if (error && error.code !== 'PGRST116') {
-        throw error;
+      if (groupId) {
+        query = query.eq('group_id', groupId);
       }
       
-      if (data && data.length > 0) {
+      const { data, error: queryError } = await query;
+      
+      if (queryError) {
+        throw queryError;
+      }
+      
+      if (data) {
         // Map class_group to group for compatibility with our components
         const mappedData = data.map(event => ({
           ...event,
-          group: event.class_group
+          group: event.class_group,
+          // Ensure date is properly formatted
+          date: new Date(event.date).toISOString()
         }));
         setEvents(mappedData);
       } else {
@@ -59,6 +63,7 @@ export function ScheduleCalendar({ teacherId = '', groupId = '' }: { teacherId?:
     } catch (err) {
       console.error('Error fetching schedule events:', err);
       setError('Не удалось загрузить расписание');
+      // Fallback to mock data on error
       setEvents(getMockEvents());
     } finally {
       setLoading(false);
@@ -290,7 +295,7 @@ export function ScheduleCalendar({ teacherId = '', groupId = '' }: { teacherId?:
                 />
               </div>
               
-              <div className="flex justify-end pt-4">
+              <div className="flex justify-end gap-2">
                 <button
                   onClick={() => {
                     setShowEventForm(false);
@@ -317,10 +322,15 @@ export function ScheduleCalendar({ teacherId = '', groupId = '' }: { teacherId?:
 
 // Mock data for demonstration
 function getMockEvents(): ScheduleEvent[] {
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(10, 0, 0, 0);
+
   return [
     {
       id: '1',
-      date: '2024-01-22T10:00:00',
+      date: tomorrow.toISOString(),
       subject: 'Математический анализ',
       room: '301',
       teacher: 'Иванов П.М.',
@@ -330,7 +340,7 @@ function getMockEvents(): ScheduleEvent[] {
     },
     {
       id: '2',
-      date: '2024-01-22T12:00:00',
+      date: new Date(tomorrow.getTime() + 2 * 60 * 60 * 1000).toISOString(), // +2 hours
       subject: 'Программирование',
       room: '405',
       teacher: 'Петрова А.С.',
@@ -340,7 +350,7 @@ function getMockEvents(): ScheduleEvent[] {
     },
     {
       id: '3',
-      date: '2024-01-24T14:00:00',
+      date: new Date(tomorrow.getTime() + 4 * 60 * 60 * 1000).toISOString(), // +4 hours
       subject: 'Физика',
       room: '201',
       teacher: 'Сидоров М.А.',

@@ -1,10 +1,19 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Calendar, Phone, Newspaper, HelpCircle, GraduationCap, User } from 'lucide-react';
+import { 
+  Calendar, 
+  Phone, 
+  Newspaper, 
+  HelpCircle, 
+  GraduationCap, 
+  User,
+  BookOpen
+} from 'lucide-react';
 
 const menuItems = [
   { icon: Calendar, text: 'Расписание', path: '/schedule' },
   { icon: GraduationCap, text: 'Успеваемость', path: '/grades' },
+  { icon: BookOpen, text: 'Материалы', path: '/materials' },
   { icon: User, text: 'Мой профиль', path: '/profile' },
   { icon: Phone, text: 'Контакты', path: '/contacts' },
   { icon: Newspaper, text: 'Новости', path: '/news' },

@@ -8,12 +8,14 @@ export function RegisterForm() {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<'student' | 'teacher'>('student');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [facultyId, setFacultyId] = useState('');
+  const [faculties, setFaculties] = useState<Array<{ id: string; name: string }>>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const navigate = useNavigate();
 
-  // Check connection status periodically
   useEffect(() => {
     setIsOnline(getConnectionStatus());
     
@@ -24,21 +26,35 @@ export function RegisterForm() {
     
     const interval = setInterval(checkOnlineStatus, 5000);
     
+    // Загрузка списка факультетов
+    const fetchFaculties = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('faculties')
+          .select('id, name')
+          .order('name');
+        
+        if (error) throw error;
+        setFaculties(data || []);
+      } catch (err) {
+        console.error('Ошибка загрузки факультетов:', err);
+      }
+    };
+
+    fetchFaculties();
     return () => clearInterval(interval);
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Check connection status before attempting registration
     if (!isOnline) {
-      setError(' Нет подключения к серверу. Проверьте интернет-соединение и попробуйте снова.');
+      setError('Нет подключения к серверу. Проверьте интернет-соединение и попробуйте снова.');
       return;
     }
     
-    // Basic validation
     if (!email || !password || !fullName) {
-      setError('Пожалуйста, заполните все поля');
+      setError('Пожалуйста, заполните все обязательные поля');
       return;
     }
 
@@ -46,34 +62,18 @@ export function RegisterForm() {
       setError('Пароль должен содержать минимум 6 символов');
       return;
     }
+
+    if (role === 'teacher' && !facultyId) {
+      setError('Для преподавателя необходимо указать факультет');
+      return;
+    }
     
     try {
       setError('');
       setLoading(true);
 
-      // Store the full name in localStorage as a backup
       localStorage.setItem('user_full_name', fullName);
 
-      // Check if user already exists using auth API instead of profiles table
-      const { data: { users }, error: checkError } = await supabase.auth.admin.listUsers({
-        filters: {
-          email: email
-        }
-      }).catch(() => {
-        // If admin API is not available, we'll proceed with registration
-        // and let the server handle duplicate emails
-        return { data: { users: [] }, error: null };
-      });
-        
-      if (checkError) {
-        console.error('Error checking existing user:', checkError);
-      } else if (users && users.length > 0) {
-        setError('Этот email уже зарегистрирован');
-        setLoading(false);
-        return;
-      }
-
-      // Proceed with registration
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -81,33 +81,25 @@ export function RegisterForm() {
           data: {
             full_name: fullName,
             role: role,
+            phone_number: phoneNumber || undefined,
+            faculty_id: facultyId || undefined
           },
         },
       });
 
       if (authError) {
-        console.error('Auth error during registration:', authError);
-        
-        if (authError.message?.includes('network') || authError.message?.includes('fetch')) {
-          setError('Проблема с подключением к серверу. Проверьте интернет-соединение.');
-        } else if (authError.message?.includes('already registered') || authError.message?.includes('already exists') || authError.message?.includes('User already registered')) {
+        if (authError.message.includes('User already registered')) {
           setError('Этот email уже зарегистрирован');
-        } else if (authError.message?.includes('Database error') || authError.code === 'unexpected_failure') {
-          // Handle the specific error we're seeing
-          setError('Ошибка при создании пользователя. Пожалуйста, попробуйте другой email или обратитесь к администратору.');
         } else {
-          setError(authError.message || 'Ошибка регистрации. Попробуйте позже.');
+          throw authError;
         }
         return;
       }
 
       if (authData?.user) {
-        // Don't try to create a profile manually - the database trigger will handle this
-        // Just show success message and redirect to login
         alert('Регистрация успешна! Теперь вы можете войти в систему.');
         navigate('/login');
       } else {
-        // This shouldn't happen if there's no error, but just in case
         setError('Неизвестная ошибка при регистрации. Пожалуйста, попробуйте позже.');
       }
     } catch (err) {
@@ -135,7 +127,6 @@ export function RegisterForm() {
             </Link>
           </p>
           
-          {/* Connection status indicator */}
           <div className="mt-2 flex justify-center">
             <div className={`flex items-center px-3 py-1 rounded-full text-sm ${isOnline ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
               {isOnline ? (
@@ -195,12 +186,40 @@ export function RegisterForm() {
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as 'student' | 'teacher')}
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
               >
                 <option value="student">Студент</option>
                 <option value="teacher">Преподаватель</option>
               </select>
             </div>
+
+            {role === 'teacher' && (
+              <>
+                <div>
+                  <input
+                    type="tel"
+                    className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                    placeholder="Номер телефона"
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <select
+                    value={facultyId}
+                    onChange={(e) => setFacultyId(e.target.value)}
+                    className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                  >
+                    <option value="">Выберите факультет...</option>
+                    {faculties.map((faculty) => (
+                      <option key={faculty.id} value={faculty.id}>
+                        {faculty.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
           </div>
 
           <div>

@@ -1,34 +1,47 @@
 import { useEffect } from 'react';
 
+interface TelegramUser {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+  language_code?: string;
+}
+
 export function useTelegram() {
-  const tg = window.Telegram?.WebApp || {
-    ready: () => {},
-    expand: () => {},
-    close: () => {},
-    sendData: () => {},
-    initDataUnsafe: {}
-  };
+  // Получаем WebApp из глобального объекта Telegram
+  const tg = window.Telegram?.WebApp;
 
   useEffect(() => {
-    // Инициализация Telegram Mini App
-    tg.ready();
-    
-    // Автоматически расширяем приложение при загрузке
-    tg.expand();
-  }, []);
+    if (tg) {
+      // Сообщаем приложению, что оно готово к отображению
+      tg.ready();
+      
+      // Расширяем приложение на весь экран
+      tg.expand();
+      
+      // Устанавливаем основной цвет
+      tg.setHeaderColor('#2563eb');
+    }
+  }, [tg]);
 
-  const onClose = () => {
-    tg.close();
+  // Получаем информацию о пользователе
+  const user: TelegramUser | undefined = tg?.initDataUnsafe?.user;
+
+  // Закрыть Web App
+  const close = () => {
+    tg?.close();
   };
 
+  // Отправить данные в бот
   const sendData = (data: any) => {
-    tg.sendData(JSON.stringify(data));
+    tg?.sendData(JSON.stringify(data));
   };
 
   return {
     tg,
-    user: tg.initDataUnsafe?.user,
-    onClose,
-    sendData,
+    user,
+    close,
+    sendData
   };
 }
