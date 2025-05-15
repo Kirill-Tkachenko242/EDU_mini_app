@@ -170,81 +170,72 @@ export function ProfessorForm({ professorId, onSuccess }: ProfessorFormProps) {
     }
   };
 
+ // вынесите типы вне компонента, export не нужен
+  interface ProfessorFormData {
+    fullName: string;
+    phoneNumber: string;
+    email: string;
+    position: string;
+    faculty_id: string;
+    description: string | null;
+  };
+  interface InsertProfessorArgs {
+  professor_data: ProfessorFormData;   // ключ совпадает с param в SQL
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    if (!(await validateForm())) return;
+
+    setLoading(true);
+    setError('');
+    setSuccess(false);
+
+    const professorData: ProfessorFormData = {
+      fullName: fullName.trim(),
+      phoneNumber: phoneNumber.trim(),
+      email: email.trim().toLowerCase(),
+      position: position.trim(),
+      faculty_id: facultyId,
+      description: description.trim() || null,
+    };
+
     try {
-      const isValid = await validateForm();
-      if (!isValid) {
-        return;
-      }
-
-      setLoading(true);
-      setError('');
-      setSuccess(false);
-
-      const normalizedEmail = email.trim().toLowerCase();
-
-      const professorData = {
-        fullName: fullName.trim(),
-        phoneNumber: phoneNumber.trim(),
-        email: normalizedEmail,
-        position: position.trim(),
-        faculty_id: facultyId,
-        description: description.trim() || null
-      };
-      
       if (isEditing && professorId) {
-        const { error: updError } = await supabase
+        const { error } = await supabase
           .from('professors')
           .update(professorData)
           .eq('id', professorId);
-
-        if (updError?.code === '23505') {
-          setEmailError('Преподаватель с таким email уже существует');
-          return;
-        }
-        if (updError) throw updError;
+        if (error) throw error;
       } else {
-        const { data: newId, error: rpcError } = await supabase
-          .rpc<{ new_id: string }>(
-            'insert_professor_if_email_unique',
-            { professor_data: professorData }
-          );
+        // === Ключевая строка — только ОДИН generic ===
+        type InsertReturn = string;          // uuid
+        type InsertArgs   = { professor_data: ProfessorFormData };
+        console.log('professorData →', professorData);
+        const { data: newId, error } = await supabase
+          .rpc<InsertReturn, InsertArgs>('insert_professor_if_email_unique', {
+            professor_data: professorData,
+          });
 
-        if (rpcError?.code === '23505') {
-          setEmailError('Преподаватель с таким email уже существует');
-          return;
-        }
-        if (rpcError) throw rpcError;
-        // newId — UUID вставленного преподавателя
+        if (error) throw error;  // сюда 23505 уже не прилетит
+        console.log('UUID преподавателя:', newId);
       }
-
 
       setSuccess(true);
-      
-      if (!isEditing) {
-        // Reset form after successful creation
-        setFullName('');
-        setPhoneNumber('');
-        setEmail('');
-        setPosition('');
-        setFacultyId('');
-        setDescription('');
-      }
-      
       onSuccess();
-      
-      setTimeout(() => {
-        setSuccess(false);
-      }, 3000);
-    } catch (err) {
-      console.error('Error saving professor:', err);
-      setError('Не удалось сохранить данные преподавателя');
+      if (!isEditing) resetForm();
+    } catch (err: any) {
+      const msg =
+        err.code === '23505'
+          ? 'Преподаватель с таким email уже существует'
+          : 'Не удалось сохранить данные преподавателя';
+      setEmailError(msg);
+      console.error(err);
     } finally {
       setLoading(false);
     }
   };
+
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6">

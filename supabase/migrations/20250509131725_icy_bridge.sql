@@ -1,18 +1,15 @@
 /*
-  # Fix professor email uniqueness and normalization
+  Fix professor email uniqueness and normalization
+  ------------------------------------------------
 
-  1. Changes
-    - Add email normalization function
-    - Create case-insensitive unique index for emails
-    - Update professor insertion function with proper return type
-    - Add email normalization trigger
-
-  2. Security
-    - Maintain SECURITY DEFINER on functions
-    - Ensure proper error handling for duplicates
+  1. Ensure all stored emails are trimmed and downcased.
+  2. Enforce uniqueness at the database level using the same normalization.
+  3. Provide a single RPC function that always returns the row’s UUID
+     (inserts new or returns existing), without ever raising a 409.
+  4. Use SECURITY DEFINER so that RLS won’t hide duplicates from the check.
 */
 
--- Create email normalization function
+-- 1. Create or replace the normalization helper
 CREATE OR REPLACE FUNCTION normalize_email(email text)
 RETURNS text
 LANGUAGE sql
@@ -21,17 +18,26 @@ AS $$
   SELECT lower(trim(email));
 $$;
 
--- Drop existing email constraint if it exists
-ALTER TABLE professors 
+-- 2. (One-time) Backfill existing rows so they’re normalized
+--    Run this once, then you can comment it out or remove it.
+UPDATE professors
+SET email = normalize_email(email)
+WHERE email IS NOT NULL
+  AND email <> normalize_email(email);
+
+-- 3. Drop any old constraint or index on the raw email column
+ALTER TABLE professors
   DROP CONSTRAINT IF EXISTS professors_email_key;
 
--- Create new case-insensitive unique index
 DROP INDEX IF EXISTS idx_professors_email_lower;
-CREATE UNIQUE INDEX idx_professors_email_lower 
-  ON professors (normalize_email(email)) 
+DROP INDEX IF EXISTS idx_professors_email;
+
+-- 4. Create a unique index on the normalized email
+CREATE UNIQUE INDEX idx_professors_email_lower
+  ON professors (( normalize_email(email) ))
   WHERE email IS NOT NULL;
 
--- Add trigger to normalize email on insert/update
+-- 5. Trigger function to keep NEW.email normalized on INSERT/UPDATE
 CREATE OR REPLACE FUNCTION normalize_professor_email()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -50,43 +56,50 @@ CREATE TRIGGER professor_email_normalize
   FOR EACH ROW
   EXECUTE FUNCTION normalize_professor_email();
 
--- Drop and recreate function with new return type
+-- 6. Drop old RPC if exists
 DROP FUNCTION IF EXISTS insert_professor_if_email_unique(jsonb);
 
-create or replace function insert_professor_if_email_unique(professor_data jsonb)
-returns uuid                    -- <<< возвращаем UUID
-language plpgsql
-security definer
-as $$
-declare
-  new_id uuid;                  -- <<< объявляем переменную для id
-begin
-  -- Проверка уникальности email
-  if exists (
-    select 1 from professors
-    where lower(email) = lower(professor_data->>'email')
-  ) then
-    raise exception 'Email already exists' using errcode = '23505';
-  end if;
+-- 7. Create the “upsert-or-return-existing” RPC
+CREATE OR REPLACE FUNCTION insert_professor_if_email_unique(professor_data jsonb)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  _mail   text := normalize_email(professor_data->>'email');
+  _id     uuid;
+BEGIN
+  -- If an existing row uses the same normalized email, return its id
+  SELECT id
+    INTO _id
+    FROM professors
+   WHERE normalize_email(email) = _mail
+   LIMIT 1;
 
-  -- Вставляем запись и сразу получаем её ID
-  insert into professors (
+  IF FOUND THEN
+    RETURN _id;
+  END IF;
+
+  -- Otherwise insert a new row (trigger will normalize email again)
+  INSERT INTO professors (
     "fullName",
     "phoneNumber",
     email,
     position,
     faculty_id,
     description
-  ) values (
+  )
+  VALUES (
     professor_data->>'fullName',
     professor_data->>'phoneNumber',
-    lower(professor_data->>'email'),
+    _mail,
     professor_data->>'position',
     (professor_data->>'faculty_id')::uuid,
     professor_data->>'description'
   )
-  returning id into new_id;      -- <<< возвращаемое значение
+  RETURNING id
+  INTO _id;
 
-  return new_id;                 -- <<< отдаём его вызывающему
-end;
+  RETURN _id;
+END;
 $$;
