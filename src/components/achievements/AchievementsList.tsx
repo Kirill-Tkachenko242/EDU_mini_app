@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Award, Trophy, AlignCenterVertical as Certificate, TrendingUp } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { Achievement, RawStatistics, Statistics } from '../../types/university';
+import { Achievement, Statistics } from '../../types/university';
 import { LoadingSpinner } from '../LoadingSpinner';
 
 export function AchievementsList() {
@@ -13,30 +13,28 @@ export function AchievementsList() {
   useEffect(() => {
     async function fetchData() {
       try {
-        /* ─────────── достижения (как было) ─────────── */
+        // Fetch achievements
         const { data: achievementsData, error: achievementsError } = await supabase
           .from('achievements')
           .select('*')
           .order('year', { ascending: false });
-        if (achievementsError) throw achievementsError;
-        setAchievements(achievementsData ?? []);
 
-        /* ─────── берём ПОСЛЕДНЮЮ строку статистики ─────── */
-        const { data: statsRow, error: statsErr } = await supabase
+        if (achievementsError) {
+          throw achievementsError;
+        }
+
+        // Fetch statistics
+        const { data: statsData, error: statsError } = await supabase
           .from('statistics')
-          .select(`
-            totalStudents:totalstudents,
-            totalProfessors:totalprofessors,
-            totalAwards:totalawards,
-            internationalRanking:internationalranking,
-            foundationYear:foundationyear
-          `)
-          .order('created_at', { ascending: false }) // ← самая свежая сверху
-          .limit(1)
-          .maybeSingle();                            // ← объект | null
+          .select('*');
 
-        if (statsErr && statsErr.code !== 'PGRST116') throw statsErr;
-        setStatistics(statsRow as Statistics | null); // поля уже в нужном виде
+        if (statsError && statsError.code !== 'PGRST116') {
+          // PGRST116 is "no rows returned" which is fine, we'll use mock data
+          throw statsError;
+        }
+
+        setAchievements(achievementsData || []);
+        setStatistics(statsData && statsData.length > 0 ? statsData[0] : null);
       } catch (err) {
         console.error('Error fetching achievements data:', err);
         setError('Не удалось загрузить данные о достижениях');
@@ -47,7 +45,6 @@ export function AchievementsList() {
 
     fetchData();
   }, []);
-
 
   if (loading) {
     return <LoadingSpinner />;

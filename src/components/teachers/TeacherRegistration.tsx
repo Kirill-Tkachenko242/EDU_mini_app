@@ -71,22 +71,17 @@ export function TeacherRegistration({ onSuccess }: TeacherRegistrationProps) {
 
       if (authData.user) {
         // Create professor record
-        const { data: profData, error: profError } = await supabase
+        const { error: profError } = await supabase
           .from('professors')
           .insert([{
             fullName,
             phoneNumber,
             email,
-            faculty_id: department,
+            department,
             position: 'Преподаватель'
-          }])
-          .select('id,email');
+          }]);
 
         if (profError) {
-          if (profError.code === '23505') {
-            setError('Преподаватель с таким email уже зарегистрирован');
-            return;
-          }
           throw profError;
         }
 

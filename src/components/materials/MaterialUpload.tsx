@@ -64,7 +64,7 @@ export function MaterialUpload({ onSuccess }: MaterialUploadProps) {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      setFile(selectedFile);
+      setFile(selectedFile); // Directly set the File object without any transformation
       setError('');
     }
   };
@@ -89,12 +89,16 @@ export function MaterialUpload({ onSuccess }: MaterialUploadProps) {
       const filePath = `${profile?.id}/${fileName}`;
 
       // Upload file to Supabase Storage with explicit content type
-      const { error: uploadError } = await supabase.storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from('materials')
-        .upload(filePath, file, {
+        .upload(filePath, file, { // Pass the File object directly
           contentType: file.type,
           cacheControl: '3600',
-          upsert: false
+          upsert: false,
+          onUploadProgress: (progress) => {
+            const percentage = (progress.loaded / progress.total) * 100;
+            setUploadProgress(Math.round(percentage));
+          }
         });
 
       if (uploadError) {
@@ -102,15 +106,9 @@ export function MaterialUpload({ onSuccess }: MaterialUploadProps) {
       }
 
       // Get public URL
-      const { data: urlData, error: urlError } = supabase.storage
+      const { data: { publicUrl } } = supabase.storage
         .from('materials')
         .getPublicUrl(filePath);
-
-      if (urlError) {
-        throw urlError;
-      }
-
-      const publicUrl = urlData.publicUrl;
 
       // Create material record
       const { error: dbError } = await supabase
@@ -129,6 +127,7 @@ export function MaterialUpload({ onSuccess }: MaterialUploadProps) {
         }]);
 
       if (dbError) {
+        // If database insert fails, try to delete the uploaded file
         await supabase.storage
           .from('materials')
           .remove([filePath]);
@@ -167,12 +166,14 @@ export function MaterialUpload({ onSuccess }: MaterialUploadProps) {
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <h2 className="text-xl font-semibold mb-4">Загрузка материала</h2>
+      
       {error && (
         <div className="mb-4 rounded-md bg-red-50 p-4 flex items-start">
           <AlertCircle className="w-5 h-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-red-700">{error}</div>
         </div>
       )}
+
       <div className="mb-4 rounded-md bg-blue-50 p-4 flex items-start">
         <Info className="w-5 h-5 text-blue-500 mr-2 flex-shrink-0 mt-0.5" />
         <div className="text-sm text-blue-700">

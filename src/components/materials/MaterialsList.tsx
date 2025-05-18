@@ -110,6 +110,22 @@ export function MaterialsList() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const formatDate = (dateString: string) => {
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return 'Дата не указана';
+      }
+      return formatDistanceToNow(date, { 
+        addSuffix: true,
+        locale: ru 
+      });
+    } catch (err) {
+      console.error('Error formatting date:', err);
+      return 'Дата не указана';
+    }
+  };
+
   // Memoize filtered and sorted materials
   const filteredMaterials = useMemo(() => {
     return materials
@@ -220,20 +236,8 @@ export function MaterialsList() {
                   <div className="flex flex-wrap gap-4 text-sm text-gray-500">
                     <span className="flex items-center">
                       <Calendar className="w-4 h-4 mr-1" />
-                      {(() => {
-                        // supabase отдаёт created_at
-                        const ts = (material as any).created_at ?? material.createdAt;
-                        const date = ts ? new Date(ts) : null;
-                        if (!date || isNaN(date.getTime())) {
-                          return '—';               // или любой плейсхолдер
-                        }
-                        return formatDistanceToNow(date, {
-                          addSuffix: true,
-                          locale: ru
-                        });
-                      })()}
+                      {formatDate(material.createdAt)}
                     </span>
-
                     
                     <span className="flex items-center">
                       <User className="w-4 h-4 mr-1" />
